@@ -27,7 +27,7 @@ PowerFunctions only supports single-, full-line comments in assembler-typical sy
 A statement consists of a left-hand side and a right-hand side with an operator in between. This syntax will be expanded
 on in the future.
 
-```
+```asm
 <target_entity> [target_objective] <operator> <source_entity> [source_objective]
 ```
 If no objective was specified, the default objective `_int32` of type `dummy` will be used instead.
