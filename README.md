@@ -130,7 +130,7 @@ if Player bananas >= #required_bananas:
     /tellraw Player {"text":"Congratulations on having gathered enough bananas!"}
 ```
 
-### Logical Operators
+#### Logical Operators
 * `>` Greater than
 * `<` Lower than
 * `>=` Greater-Equals
