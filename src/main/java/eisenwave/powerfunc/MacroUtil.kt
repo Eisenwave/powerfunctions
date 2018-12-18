@@ -29,3 +29,5 @@ fun withSuffix(path: String, suffix: String): String {
 fun withoutSuffix(path: String):String {
     return path.substringBeforeLast('.')
 }
+
+data class BlockPos(val x: Int, val y: Int, val z: Int)

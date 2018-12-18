@@ -180,39 +180,40 @@ fun tokenizeLine(raw: String): MacroStatement {
 
 // ENUMS
 
-enum class StatementType {
-    EMPTY,
-    // /...
-    COMMAND,
-
-    // comments, empty lines etc.
-    FORMATTING,
-
-    // macro command statements
-    ABSOLUTE,
-    NEGATE,
-    BOOLIFY,
-
-    // macro requirement commands
-    REQUIRE,
-    REQUIRE_OBJECTIVE,
-    REQUIRE_SCORE,
-
-    // code block statements
-    IF,
-    WHILE,
-    CHAIN,
-
-    // variable operation statements
-    ASSIGNMENT_OPERATION,
-    LITERAL_ASSIGNMENT
+enum class InvocationType {
+    SET_BLOCK,
+    CALL_FUNCTION
 }
 
-enum class RequirementType {
-    OBJECTIVE,
-    INIT_SCORE,
-    COMMAND,
-    LOGIC_ENTITY
+enum class StatementType(val invocationType: InvocationType?) {
+    EMPTY(null),
+    // /...
+    COMMAND(null),
+
+    // comments, empty lines etc.
+    FORMATTING(null),
+
+    // macro command statements
+    ABSOLUTE(null),
+    NEGATE(null),
+    BOOLIFY(null),
+
+    // macro requirement commands
+    REQUIRE(null),
+    REQUIRE_OBJECTIVE(null),
+    REQUIRE_SCORE(null),
+
+    // code block statements
+    IF(InvocationType.CALL_FUNCTION),
+    WHILE(InvocationType.CALL_FUNCTION),
+    CHAIN(InvocationType.SET_BLOCK),
+
+    // variable operation statements
+    ASSIGNMENT_OPERATION(null),
+    LITERAL_ASSIGNMENT(null);
+
+    val isBlockHeader = this.invocationType != null
+
 }
 
 enum class LogicalOperator(val string: String) {
@@ -342,85 +343,6 @@ class MacroSyntaxException : MacroParseException {
 
 }
 
-// REQUIREMENTS
-
-abstract class Requirement(val args: Array<String>) {
-
-    abstract val type: RequirementType
-
-    abstract fun expand(): Array<String>
-
-    override fun toString(): String {
-        return "$type${Arrays.toString(args)}"
-    }
-
-    override fun equals(other: Any?): Boolean {
-        return other is Requirement
-                && other.type == this.type
-                && other.args.contentEquals(this.args)
-    }
-
-    override fun hashCode(): Int {
-        return type.hashCode() xor Arrays.hashCode(args)
-    }
-
-}
-
-class CommandRequirement(private val command: String) : Requirement(arrayOf(command)) {
-
-    override val type = RequirementType.COMMAND
-
-    override fun expand(): Array<String> {
-        return arrayOf(command)
-    }
-
-}
-
-class ObjectiveRequirement(objective: String, type: String) : Requirement(arrayOf(objective, type)) {
-
-    constructor(objective: String) : this(objective, "dummy")
-
-    override val type = RequirementType.OBJECTIVE
-
-    override fun expand(): Array<String> {
-        return arrayOf("scoreboard objectives add ${args[0]} ${args[1]}")
-    }
-
-}
-
-class ScoreRequirement(entity: String, objective: String, value: Int) :
-        Requirement(arrayOf(entity, objective, value.toString())) {
-
-    // constructor(entity: String, value: Int) : this(entity, INT32, value)
-
-    constructor(value: Int) : this("#$value", INT32, value)
-
-    override val type = RequirementType.INIT_SCORE
-
-    override fun expand(): Array<String> {
-        return arrayOf("scoreboard players set ${args[0]} ${args[1]} ${args[2]}")
-    }
-
-}
-
-class LogicEntityRequirement : Requirement(emptyArray()) {
-
-    override val type = RequirementType.LOGIC_ENTITY
-
-    override fun expand(): Array<String> {
-        return arrayOf(
-                "kill @e[tag=_logic]",
-                "summon minecraft:armor_stand 0 0 0 {NoGravity:1,Marker:1,Invisible:1,Invulnerable:1,Tags:[_logic]}"
-        )
-    }
-
-    override fun hashCode() = type.hashCode()
-
-    override fun equals(other: Any?): Boolean {
-        return other is Requirement && other.type == this.type
-    }
-}
-
 // STATEMENTS
 
 abstract class MacroStatement(val raw: String) {
@@ -428,7 +350,6 @@ abstract class MacroStatement(val raw: String) {
     //protected val raw = raw
     abstract val type: StatementType
 
-    abstract val isBlockHeader: Boolean
     open val expands = true
 
     abstract val requirements: Array<out Requirement>
@@ -440,8 +361,6 @@ abstract class MacroStatement(val raw: String) {
 class CommandStatement(raw: String, private val command: String) : MacroStatement(raw) {
 
     override val type = StatementType.COMMAND
-
-    override val isBlockHeader = false
 
     override val requirements = emptyArray<Requirement>()
 
@@ -455,8 +374,6 @@ class FormattingStatement(raw: String) : MacroStatement(raw) {
 
     override val type = StatementType.FORMATTING
 
-    override val isBlockHeader = false
-
     override val requirements = emptyArray<Requirement>()
 
     override fun expand(): Array<String> {
@@ -468,8 +385,6 @@ class FormattingStatement(raw: String) : MacroStatement(raw) {
 class NegateStatement(raw: String, val player: String, val objective: String) : MacroStatement(raw) {
 
     override val type = StatementType.NEGATE
-
-    override val isBlockHeader = false
 
     override val requirements = arrayOf(
             ObjectiveRequirement(INT32),
@@ -490,7 +405,6 @@ class NegateStatement(raw: String, val player: String, val objective: String) : 
 class BoolifyStatement(raw: String, val player: String, val objective: String) : MacroStatement(raw) {
 
     override val type = StatementType.BOOLIFY
-    override val isBlockHeader = false
 
     override val requirements = arrayOf(ObjectiveRequirement(INT32))
 
@@ -503,7 +417,6 @@ class BoolifyStatement(raw: String, val player: String, val objective: String) :
 class AbsoluteStatement(raw: String, private val player: String, private val objective: String) : MacroStatement(raw) {
 
     override val type = StatementType.ABSOLUTE
-    override val isBlockHeader = false
 
     override val requirements = arrayOf(
             ObjectiveRequirement(INT32),
@@ -523,7 +436,6 @@ class AbsoluteStatement(raw: String, private val player: String, private val obj
 class RequireCommandStatement(raw: String, command: String) : MacroStatement(raw) {
 
     override val type = StatementType.REQUIRE
-    override val isBlockHeader = false
     override val expands = false
 
     override val requirements = arrayOf(CommandRequirement(command))
@@ -535,7 +447,6 @@ class RequireCommandStatement(raw: String, command: String) : MacroStatement(raw
 class RequireObjectiveStatement(raw: String, objective: String, objectiveType: String) : MacroStatement(raw) {
 
     override val type = StatementType.REQUIRE_OBJECTIVE
-    override val isBlockHeader = false
     override val expands = false
 
     override val requirements = arrayOf(ObjectiveRequirement(objective, objectiveType))
@@ -547,7 +458,6 @@ class RequireObjectiveStatement(raw: String, objective: String, objectiveType: S
 class RequireScoreStatement(raw: String, entity: String, objective: String, value: Int) : MacroStatement(raw) {
 
     override val type = StatementType.REQUIRE_OBJECTIVE
-    override val isBlockHeader = false
     override val expands = false
 
     override val requirements = arrayOf(ScoreRequirement(entity, objective, value))
@@ -560,7 +470,6 @@ class LiteralAssignmentStatement(raw: String, val player: String, val objective:
         MacroStatement(raw) {
 
     override val type = StatementType.LITERAL_ASSIGNMENT
-    override val isBlockHeader = false
 
     override val requirements = emptyArray<Requirement>()
 
@@ -573,12 +482,13 @@ class LiteralAssignmentStatement(raw: String, val player: String, val objective:
 class ChainStatement(raw: String, val value: Int) : MacroStatement(raw) {
 
     override val type = StatementType.CHAIN
-    override val isBlockHeader = true
-    override val expands = false
+    override val expands = true
 
     override val requirements = emptyArray<Requirement>()
 
-    override fun expand() = emptyArray<String>()
+    override fun expand() = arrayOf(
+            "setblock \$_loc minecraft:redstone_block"
+    )
 
 }
 
@@ -638,8 +548,6 @@ class ConditionalOperatorStatement(override val type: StatementType, raw: String
             }
         }
     }
-
-    override val isBlockHeader = true
 
     override val requirements = when {
         rhsConstant != null && lhsConstant != null -> arrayOf(
@@ -722,8 +630,6 @@ class AssignmentOperationStatement(raw: String,
                                    val source: String, val srcObjective: String) : MacroStatement(raw) {
 
     override val type = StatementType.ASSIGNMENT_OPERATION
-
-    override val isBlockHeader = false
 
     override val requirements
         get(): Array<out Requirement> {

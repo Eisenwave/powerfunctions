@@ -9,7 +9,8 @@ class MacroProcessor(private val file: File, private val outputDir: File) {
     private val metRequirements = HashSet<Requirement>()
     private val setupFile = File(outputDir, "_setup.mcfunction")
 
-    var preserveFormatting = false
+    private var preserveFormatting = false
+    private var chainX = 0
 
     init {
         if (!workingDir.isDirectory)
@@ -24,10 +25,11 @@ class MacroProcessor(private val file: File, private val outputDir: File) {
         } else listOf(file)
 
         for (file in parsableFiles) {
+            println("Parsing $file ...")
             val lines: List<String> = FileReader(file).use(FileReader::readLines)
             val outputFile = File(outputDir, withSuffix(file.toString(), "mcfunction"))
 
-            parseLines(lines, outputFile)
+            parseLines(lines, outputFile, true)
         }
 
         val requirementsSorted = metRequirements.sortedWith(Comparator { a, b -> a.type.compareTo(b.type) })
@@ -43,26 +45,62 @@ class MacroProcessor(private val file: File, private val outputDir: File) {
         //setupWriter.close()
     }
 
-    private fun parseLines(lines: List<String>, outputFile: File) {
+    /**
+     * Parses a block consisting of multiple lines of statements and optionally writes the result into a specified
+     * output file.
+     *
+     * @param lines the lines of code
+     * @param outputFile the file into which to write the compiled code
+     * @param noInline forces this layer of lines to not be inlined and instead be written to the file
+     * @return the line to be inlined or null if the block can't be inlined
+     */
+    private fun parseLines(lines: List<String>, outputFile: File, noInline: Boolean): String? {
         //val statements: List<MacroStatement> = lines.mapIndexed { index, line -> parseLine(index, line) }
 
         val outLines: MutableList<String> = ArrayList()
 
-        var blockMode = false
+        var parsingInBlockMode = false
         var blockPath = ""
-        var blockHeadExp = emptyArray<String>()
-        var blockRecursive = false
+        var blockHead: MacroStatement? = null
         val blockLines = ArrayList<String>()
 
         fun createBlock() {
-            val blockHeadLines = blockHeadExp.run {
-                this[lastIndex] = this[lastIndex].replace("\$_do", "function $NAMESPACE:$blockPath"); this
+            val type = blockHead!!.type
+            val exp = blockHead!!.expand()
+            val blockNoInline: Boolean
+
+            // while statements generate recursive functions, so we need to add the recursive
+            // callback to the block before we even parse it
+            if (type == StatementType.WHILE) {
+                exp[exp.lastIndex] = exp[exp.lastIndex].replace("\$_do", "function $NAMESPACE:$blockPath")
+                blockLines += exp.map { "/$it" }
+                blockNoInline = true
+            } else blockNoInline = false
+
+            // recursive call
+            val inlinedBlock = parseLines(blockLines, File(outputDir, "$blockPath.mcfunction"), blockNoInline)
+            val blockReplacement = inlinedBlock ?: "function $NAMESPACE:$blockPath"
+
+            when (type.invocationType) {
+                InvocationType.CALL_FUNCTION ->
+                    exp[exp.lastIndex] = exp[exp.lastIndex].replace("\$_do", blockReplacement)
+
+                InvocationType.SET_BLOCK -> {
+                    exp[exp.lastIndex] = exp[exp.lastIndex].replace("\$_loc", "$chainX 1 1")
+                    val zeroNBT = "{Command:\"setblock ~ ~ ~1 minecraft:stone\",Conditional:0b,auto:0b}"
+                    val firstNBT = "{Command:\"$blockReplacement\",Conditional:0b,auto:0b}"
+                    val chainNBT = "{Command:\"$blockReplacement\",Conditional:0b,auto:1b}"
+
+                    metRequirements += BlockRequirement(BlockPos(chainX, 1, 0), "command_block", 3, zeroNBT)
+                    metRequirements += BlockRequirement(BlockPos(chainX, 1, 2), "command_block", 3, firstNBT)
+                    for (z in 3..(blockHead as ChainStatement).value + 1) {
+                        metRequirements += BlockRequirement(BlockPos(chainX, 1, z), "chain_command_block", 3, chainNBT)
+                    }
+                    chainX++
+                }
             }
-            outLines += blockHeadLines
-            if (blockRecursive)
-                blockLines += blockHeadLines.map { "/$it" }
-            val blockFile = File(outputDir, "$blockPath.mcfunction")
-            parseLines(blockLines, blockFile)
+
+            outLines += exp
             blockLines.clear()
         }
 
@@ -70,7 +108,7 @@ class MacroProcessor(private val file: File, private val outputDir: File) {
             val line = lines[index]
             //println("$index=$line: blockMode=$blockMode")
 
-            if (blockMode) when {
+            if (parsingInBlockMode) when {
                 line.isBlank() -> {
                     if (preserveFormatting)
                         blockLines.add("")
@@ -87,7 +125,7 @@ class MacroProcessor(private val file: File, private val outputDir: File) {
                 }
                 else -> {
                     createBlock()
-                    blockMode = false
+                    parsingInBlockMode = false
                 }
             }
 
@@ -95,31 +133,26 @@ class MacroProcessor(private val file: File, private val outputDir: File) {
             if (!preserveFormatting && statement.type == StatementType.FORMATTING)
                 continue@outer
 
-            if (statement.isBlockHeader) {
-                blockMode = true
+            if (statement.type.isBlockHeader) {
+                parsingInBlockMode = true
                 blockPath = "${outputFile.nameWithoutExtension}_${index + 1}"
-                blockRecursive = statement.type == StatementType.WHILE
-                blockHeadExp = statement.expand()
+                blockHead = statement
             } else outLines += statement.expand()
 
-            for (requirement in statement.requirements) {
-                //println("${statement.type}: $requirement)
-                if (requirement !in metRequirements) {
-                    //for (expanded in requirement.expand())
-                    //    setupWriter.appendln(expanded)
-                    metRequirements += requirement
-                }
-            }
+            metRequirements += statement.requirements
         }
 
         // if in block and end of lines reached, create new block as well
-        if (blockMode)
+        if (parsingInBlockMode)
             createBlock()
 
-        FileWriter(outputFile).use {
-            for (line in outLines)
-                it.appendln(line)
-        }
+        return if (noInline || outLines.size > 1) {
+            FileWriter(outputFile).use {
+                for (line in outLines)
+                    it.appendln(line)
+            }
+            null
+        } else outLines.first()
     }
 
     private fun parseLine(num: Int, line: String): MacroStatement {
