@@ -1,14 +1,18 @@
 package eisenwave.powerfunc
 
 import java.io.*
+import java.util.*
 import kotlin.system.exitProcess
 
-class MacroProcessor(private val file: File, private val outputDir: File) {
+class MacroProcessor(private val outputDir: File) {
+
+    // private val fileStack = LinkedList<FileStackElement>()
 
     private val workingDir = File(".")
     private val metRequirements = HashSet<Requirement>()
     private val setupFile = File(outputDir, "_setup.mcfunction")
 
+    private lateinit var currentFile: File
     private var preserveFormatting = false
     private var chainX = 0
 
@@ -19,17 +23,20 @@ class MacroProcessor(private val file: File, private val outputDir: File) {
             throw FileNotFoundException("Output directory \"$outputDir\" is not a valid directory")
     }
 
-    fun parse() {
+    fun parse(file: File) {
         val parsableFiles: List<File> = if (file.isDirectory) {
             file.listFiles().filter { it.name.endsWith(".pf") }
         } else listOf(file)
 
-        for (file in parsableFiles) {
-            println("Parsing $file ...")
-            val lines: List<String> = FileReader(file).use(FileReader::readLines)
-            val outputFile = File(outputDir, withSuffix(file.toString(), "mcfunction"))
+        for (f in parsableFiles) {
+            currentFile = f
+            println("Parsing $currentFile ... ")
+            val before = System.currentTimeMillis()
+            val lines: List<String> = FileReader(f).readLines()
+            val outputFile = File(outputDir, withSuffix(f.toString(), "mcfunction"))
 
             parseLines(lines, outputFile, true)
+            println("  Done! (${System.currentTimeMillis() - before} ms)")
         }
 
         val requirementsSorted = metRequirements.sortedWith(Comparator { a, b -> a.type.compareTo(b.type) })
@@ -104,6 +111,7 @@ class MacroProcessor(private val file: File, private val outputDir: File) {
             blockLines.clear()
         }
 
+        // evaluate all lines
         outer@ for (index in 0..lines.lastIndex) {
             val line = lines[index]
             //println("$index=$line: blockMode=$blockMode")
@@ -130,6 +138,8 @@ class MacroProcessor(private val file: File, private val outputDir: File) {
             }
 
             val statement = parseLine(index, line)
+            statement.warnings.forEach { this.warn(index + 1, line, it) }
+
             if (!preserveFormatting && statement.type == StatementType.FORMATTING)
                 continue@outer
 
@@ -168,9 +178,15 @@ class MacroProcessor(private val file: File, private val outputDir: File) {
     }
 
     @Suppress("UNUSED_PARAMETER")
+    private fun warn(lineNum: Int, line: String, message: String) {
+        System.err.println("  WARNING: $message")
+        System.err.println("    at ${currentFile.name}: $lineNum")
+    }
+
+    @Suppress("UNUSED_PARAMETER")
     private fun error(lineNum: Int, line: String, ex: MacroParseException) {
-        System.err.println("Error: ${ex.message}")
-        System.err.println("  at ${file.name}: $lineNum")
+        System.err.println("  ERROR: ${ex.message}")
+        System.err.println("    at ${currentFile.name}: $lineNum")
     }
 
 }

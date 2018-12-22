@@ -325,24 +325,6 @@ enum class AssignmentOperator(val string: String) {
 
 }
 
-// EXCEPTIONS
-
-open class MacroParseException : Exception {
-
-    constructor(message: String) : super(message)
-
-    constructor(message: String, cause: Throwable) : super(message, cause)
-
-}
-
-class MacroSyntaxException : MacroParseException {
-
-    constructor(message: String) : super(message)
-
-    constructor(message: String, cause: Throwable) : super(message, cause)
-
-}
-
 // STATEMENTS
 
 abstract class MacroStatement(val raw: String) {
@@ -353,6 +335,8 @@ abstract class MacroStatement(val raw: String) {
     open val expands = true
 
     abstract val requirements: Array<out Requirement>
+
+    open val warnings = emptyArray<String>()
 
     abstract fun expand(): Array<String>
 
@@ -575,48 +559,89 @@ class ConditionalOperatorStatement(override val type: StatementType, raw: String
         )
     }
 
+    override val warnings = if (lhsConstant != null)
+        arrayOf("Pointless constant expression $lhs $op $rhs")
+    else
+        emptyArray()
+
     override fun expand(): Array<String> {
-        return when (op) {
+        return if (rhsConstant == null) {
+            when (op) {
+                LogicalOperator.GT -> arrayOf(
+                        "$CMD_OPERATION $PLAYER_TMP $INT32 = $lhs $lhsObjective",
+                        "$CMD_OPERATION $PLAYER_TMP $INT32 -= $rhs $rhsObjective",
+                        "$CMD_OPERATION $LOGIC_ENTITY $INT32 = $PLAYER_TMP $INT32",
+                        "execute @e[tag=_logic,c=1,score_${INT32}_min=1] ~ ~ ~ \$_do"
+                )
+
+                LogicalOperator.LT -> arrayOf(
+                        "$CMD_OPERATION $PLAYER_TMP $INT32 = $lhs $lhsObjective",
+                        "$CMD_OPERATION $PLAYER_TMP $INT32 -= $rhs $rhsObjective",
+                        "$CMD_OPERATION $LOGIC_ENTITY $INT32 = $PLAYER_TMP $INT32",
+                        "execute @e[tag=_logic,c=1,score_$INT32=-1] ~ ~ ~ \$_do"
+                )
+
+                LogicalOperator.GE -> arrayOf(
+                        "$CMD_OPERATION $PLAYER_TMP $INT32 = $lhs $lhsObjective",
+                        "$CMD_OPERATION $PLAYER_TMP $INT32 -= $rhs $rhsObjective",
+                        "$CMD_OPERATION $LOGIC_ENTITY $INT32 = $PLAYER_TMP $INT32",
+                        "execute @e[tag=_logic,c=1,score_${INT32}_min=0] ~ ~ ~ \$_do"
+                )
+
+                LogicalOperator.LE -> arrayOf(
+                        "$CMD_OPERATION $PLAYER_TMP $INT32 = $lhs $lhsObjective",
+                        "$CMD_OPERATION $PLAYER_TMP $INT32 -= $rhs $rhsObjective",
+                        "$CMD_OPERATION $LOGIC_ENTITY $INT32 = $PLAYER_TMP $INT32",
+                        "execute @e[tag=_logic,c=1,score_$INT32=0] ~ ~ ~ \$_do"
+                )
+
+                LogicalOperator.EQ -> arrayOf(
+                        "$CMD_OPERATION $PLAYER_TMP $INT32 = $lhs $lhsObjective",
+                        "$CMD_OPERATION $PLAYER_TMP $INT32 -= $rhs $rhsObjective",
+                        "$CMD_OPERATION $LOGIC_ENTITY $INT32 = $PLAYER_TMP $INT32",
+                        "execute @e[tag=_logic,c=1,score_$INT32=0,score_${INT32}_min=0] ~ ~ ~ \$_do"
+                )
+
+                LogicalOperator.NEQ -> arrayOf(
+                        "$CMD_OPERATION $PLAYER_TMP $INT32 = $lhs $lhsObjective",
+                        "$CMD_OPERATION $PLAYER_TMP $INT32 -= $rhs $rhsObjective",
+                        "$CMD_OPERATION $PLAYER_TMP $INT32 /= $PLAYER_TMP $INT32",
+                        "$CMD_OPERATION $LOGIC_ENTITY $INT32 = $PLAYER_TMP $INT32",
+                        "execute @e[tag=_logic,c=1,score_${INT32}_min=1] ~ ~ ~ \$_do"
+                )
+            }
+        } else when (op) {
             LogicalOperator.GT -> arrayOf(
-                    "$CMD_OPERATION $PLAYER_TMP $INT32 = $lhs $lhsObjective",
-                    "$CMD_OPERATION $PLAYER_TMP $INT32 -= $rhs $rhsObjective",
-                    "$CMD_OPERATION $LOGIC_ENTITY $INT32 = $PLAYER_TMP $INT32",
-                    "execute @e[tag=_logic,c=1,score_${INT32}_min=1] ~ ~ ~ \$_do"
+                    "$CMD_OPERATION $LOGIC_ENTITY $INT32 = $lhs $lhsObjective",
+                    "execute @e[tag=_logic,c=1,score_${INT32}_min=${rhsConstant + 1}] ~ ~ ~ \$_do"
             )
 
             LogicalOperator.LT -> arrayOf(
-                    "$CMD_OPERATION $PLAYER_TMP $INT32 = $lhs $lhsObjective",
-                    "$CMD_OPERATION $PLAYER_TMP $INT32 -= $rhs $rhsObjective",
-                    "$CMD_OPERATION $LOGIC_ENTITY $INT32 = $PLAYER_TMP $INT32",
-                    "execute @e[tag=_logic,c=1,score_$INT32=-1] ~ ~ ~ \$_do"
+                    "$CMD_OPERATION $LOGIC_ENTITY $INT32 = $lhs $lhsObjective",
+                    "execute @e[tag=_logic,c=1,score_$INT32=${rhsConstant - 1}] ~ ~ ~ \$_do"
             )
 
             LogicalOperator.GE -> arrayOf(
-                    "$CMD_OPERATION $PLAYER_TMP $INT32 = $lhs $lhsObjective",
-                    "$CMD_OPERATION $PLAYER_TMP $INT32 -= $rhs $rhsObjective",
-                    "$CMD_OPERATION $LOGIC_ENTITY $INT32 = $PLAYER_TMP $INT32",
-                    "execute @e[tag=_logic,c=1,score_${INT32}_min=0] ~ ~ ~ \$_do"
+                    "$CMD_OPERATION $LOGIC_ENTITY $INT32 = $lhs $lhsObjective",
+                    "execute @e[tag=_logic,c=1,score_${INT32}_min=$rhsConstant] ~ ~ ~ \$_do"
             )
 
             LogicalOperator.LE -> arrayOf(
-                    "$CMD_OPERATION $PLAYER_TMP $INT32 = $lhs $lhsObjective",
-                    "$CMD_OPERATION $PLAYER_TMP $INT32 -= $rhs $rhsObjective",
-                    "$CMD_OPERATION $LOGIC_ENTITY $INT32 = $PLAYER_TMP $INT32",
-                    "execute @e[tag=_logic,c=1,score_$INT32=0] ~ ~ ~ \$_do"
+                    "$CMD_OPERATION $LOGIC_ENTITY $INT32 = $lhs $lhsObjective",
+                    "execute @e[tag=_logic,c=1,score_$INT32=$rhsConstant] ~ ~ ~ \$_do"
             )
 
-            LogicalOperator.EQ -> arrayOf(
-                    "$CMD_OPERATION $PLAYER_TMP $INT32 = $lhs $lhsObjective",
-                    "$CMD_OPERATION $PLAYER_TMP $INT32 -= $rhs $rhsObjective",
-                    "$CMD_OPERATION $LOGIC_ENTITY $INT32 = $PLAYER_TMP $INT32",
-                    "execute @e[tag=_logic,c=1,score_$INT32=0,score_${INT32}_min=0] ~ ~ ~ \$_do"
-            )
+            LogicalOperator.EQ -> {
+                val sel = "@e[tag=_logic,c=1,score_${INT32}_min=$rhsConstant,score_$INT32=$rhsConstant]"
+                arrayOf(
+                        "$CMD_OPERATION $LOGIC_ENTITY $INT32 = $lhs $lhsObjective",
+                        "execute $sel ~ ~ ~ \$_do"
+                )
+            }
 
             LogicalOperator.NEQ -> arrayOf(
                     "$CMD_OPERATION $PLAYER_TMP $INT32 = $lhs $lhsObjective",
-                    "$CMD_OPERATION $PLAYER_TMP $INT32 -= $rhs $rhsObjective",
                     "$CMD_OPERATION $PLAYER_TMP $INT32 /= $PLAYER_TMP $INT32",
-                    "$CMD_OPERATION $LOGIC_ENTITY $INT32 = $PLAYER_TMP $INT32",
                     "execute @e[tag=_logic,c=1,score_${INT32}_min=1] ~ ~ ~ \$_do"
             )
         }

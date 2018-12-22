@@ -12,5 +12,5 @@ fun main(args: Array<String>) {
     val file = File(args[0])
     val outputDir = File(args[1])
 
-    MacroProcessor(file, outputDir).parse()
+    MacroProcessor(outputDir).parse(file)
 }
